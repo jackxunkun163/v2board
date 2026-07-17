@@ -60,12 +60,12 @@ else
 fi
 
 # ---------- 2. wait for MySQL ----------
+# Use PHP PDO (same driver Laravel uses) instead of `mysqladmin ping`:
+# the mariadb-client shipped in Alpine produces false negatives against
+# mysql:5.7 in some auth configurations.
 MYSQL_READY=0
 for i in $(seq 1 60); do
-    if mysqladmin ping \
-        -h"$DB_HOST" -P"$DB_PORT" \
-        -u"$DB_USERNAME" -p"$DB_PASSWORD" \
-        --silent 2>/dev/null; then
+    if php /tmp/db-ping.php 2>/dev/null; then
         MYSQL_READY=1
         break
     fi

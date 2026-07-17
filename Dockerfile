@@ -63,6 +63,7 @@ COPY docker/supervisord.conf      /etc/supervisord.conf
 COPY docker/nginx.conf            /etc/nginx/http.d/default.conf
 COPY docker/entrypoint.sh         /entrypoint.sh
 COPY docker/init-db.php           /tmp/init-db.php
+COPY docker/db-ping.php           /tmp/db-ping.php
 RUN  chmod +x /entrypoint.sh \
     && sed -i 's/^user = .*/user = www-data/' /usr/local/etc/php-fpm.d/www.conf \
     && sed -i 's/^group = .*/group = www-data/' /usr/local/etc/php-fpm.d/www.conf
