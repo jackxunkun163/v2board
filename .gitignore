@@ -20,5 +20,10 @@ composer.phar
 composer.lock
 yarn.lock
 docker-compose.yml
+.env.docker
 .DS_Store
 public/clients/*
+
+# Keep our committed compose file tracked (the line above exists so per-deploy
+# overrides on upstream checkouts don't get committed; we want the base file in).
+!docker-compose.yml

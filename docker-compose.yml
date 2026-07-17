@@ -1,0 +1,83 @@
+# V2Board Docker Compose
+#
+# Fully self-contained stack: MySQL + Redis + v2board, all in containers.
+# No external services required.
+
+services:
+  v2board:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: v2board:latest
+    container_name: v2board
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${V2BOARD_PORT:-8080}:80"
+    environment:
+      APP_URL:        ${APP_URL:-http://localhost}
+      APP_ENV:        ${APP_ENV:-production}
+      APP_DEBUG:      ${APP_DEBUG:-false}
+      DB_HOST:        mysql
+      DB_PORT:        3306
+      DB_DATABASE:    ${DB_DATABASE:-v2board}
+      DB_USERNAME:    ${DB_USERNAME:-v2board}
+      DB_PASSWORD:    ${DB_PASSWORD}
+      REDIS_HOST:     redis
+      REDIS_PORT:     6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      ADMIN_EMAIL:    ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      # Persist runtime-mutable state across image rebuilds.
+      # .env is intentionally NOT a named volume: it's regenerated from the
+      # environment block above on each fresh container start (single source
+      # of truth = compose env_file).
+      - v2board-storage:/var/www/v2board/storage
+      - v2board-config:/var/www/v2board/config
+
+  mysql:
+    image: mysql:5.7
+    container_name: v2board-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpass-change-me}
+      MYSQL_DATABASE:      ${DB_DATABASE:-v2board}
+      MYSQL_USER:          ${DB_USERNAME:-v2board}
+      MYSQL_PASSWORD:      ${DB_PASSWORD}
+    volumes:
+      - v2board-mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # No host port published by default: v2board reaches it via the compose
+    # network. Uncomment to inspect from the host (bind to localhost only).
+    # ports:
+    #   - "127.0.0.1:3306:3306"
+
+  redis:
+    image: redis:7-alpine
+    container_name: v2board-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - v2board-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    # ports:
+    #   - "127.0.0.1:6379:6379"
+
+volumes:
+  v2board-storage:
+  v2board-config:
+  v2board-mysql:
+  v2board-redis:
