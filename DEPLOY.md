@@ -45,8 +45,9 @@ docker/
 ├── nginx.conf            # 容器内 nginx 站点
 ├── supervisord.conf      # 进程编排
 ├── laravel.crontab       # schedule:run
-├── entrypoint.sh         # 首次启动自动化(建 .env / 导库 / 建管理员)
-└── init-db.php           # 导入 install.sql + 建管理员
+├── entrypoint.sh         # 首次启动自动化(建 .env / 等待 MySQL / 导库 / 建管理员)
+├── init-db.php           # 导入 install.sql + 建管理员
+└── db-ping.php           # MySQL 存活探测(PHP PDO,绕开 mariadb-client 假阴性)
 ```
 
 ## 快速开始
@@ -270,8 +271,9 @@ tar czf v2board-state-$(date +%F).tgz \
 
 | 症状 | 排查 |
 |---|---|
+| `docker compose logs -f v2board` 立即返回空 | v2board 容器没创建。先确认 `up -d` 跑过,`docker compose ps -a` 应能看到 v2board |
 | 容器一直 restart | `docker compose logs v2board` 看启动报错。最常见是 DB/Redis 连不上 |
-| 首次启动卡在 "Waiting for MySQL" | MySQL 初始化需要 30-60s,正常;超过 2 分钟检查 `mysql` 容器日志 |
+| 首次启动 "Waiting for MySQL" 等 60 次后 WARNING,但 init-db 仍成功 | mariadb-client 的 `mysqladmin ping` 对 mysql:5.7 有认证假阴性,entrypoint 已改用 PHP PDO 探测。若仍出现,检查 `.env.docker` 里 `DB_PASSWORD` 是否含 `$`(compose 会插值,需写成 `$$`)|
 | 后台 404 / 路径不对 | `secure_path` 算错,用上面的 `php -r` 命令重新查 |
 | 改了后台配置不生效 | 容器内已 `config:cache`;面板保存时会自动重刷。Webman 模式不适用(本镜像是 PHP-FPM) |
 | horizon 不工作 | `docker compose exec v2board php artisan horizon` 看前台输出;通常是 Redis 连不上 |
