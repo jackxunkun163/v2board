@@ -185,11 +185,11 @@ ufw --force enable
 - 用户中心:`https://<域名>/`
 - 后台路径:`https://<域名>/<secure_path>`,默认 `secure_path = hash('crc32b', APP_KEY)`
 
-查看具体路径:
+查看具体路径(`php -r` 不 bootstrap Laravel,要用 `artisan tinker`):
 
 ```bash
 docker compose --env-file .env.docker exec v2board \
-    php -r "echo hash('crc32b', config('app.key')), PHP_EOL;"
+    php artisan tinker --execute 'echo hash("crc32b", config("app.key"));'
 ```
 
 或在管理员登录后,「主题配置 → 安全路径」修改。首次登录后建议立刻在用户中心改 `ADMIN_PASSWORD`。
