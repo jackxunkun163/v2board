@@ -28,12 +28,33 @@ set_env() {
 }
 
 # ---------- 1. .env ----------
+# APP_KEY is the JWT signing key (AuthService uses it for auth_data). If it
+# changes across container rebuilds, every signed login token is invalidated
+# and users get kicked back to the login page. We therefore persist it in the
+# storage volume (which IS a named volume and survives rebuilds).
+APPKEY_CACHE="${APP_DIR}/storage/.app-key"
+
 if [ ! -f .env ]; then
     log "Initializing .env from .env.example"
     cp .env.example .env
 
-    APP_KEY=$(php artisan key:generate --show)
+    # APP_KEY precedence:
+    #   1) cached copy in storage/ (stable across rebuilds — preferred)
+    #   2) APP_KEY env var (lets users pin it via .env.docker)
+    #   3) freshly generated (first boot only)
+    if [ -f "$APPKEY_CACHE" ]; then
+        APP_KEY=$(cat "$APPKEY_CACHE")
+        log "Reusing APP_KEY from $APPKEY_CACHE"
+    elif [ -n "$APP_KEY" ]; then
+        log "Using APP_KEY from environment"
+    else
+        APP_KEY=$(php artisan key:generate --show)
+        log "Generated new APP_KEY"
+    fi
     set_env APP_KEY  "$APP_KEY"
+    mkdir -p "$(dirname "$APPKEY_CACHE")"
+    echo "$APP_KEY" > "$APPKEY_CACHE"
+
     set_env APP_ENV  "${APP_ENV:-production}"
     set_env APP_DEBUG "${APP_DEBUG:-false}"
     set_env APP_URL  "${APP_URL:-http://localhost}"

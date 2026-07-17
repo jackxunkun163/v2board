@@ -124,6 +124,7 @@ curl -I http://localhost:8080/    # 应 200
 | `APP_URL` | — | 站点完整 URL,**必须**改成实际域名/IP |
 | `APP_ENV` | `production` | 生产保持 production |
 | `APP_DEBUG` | `false` | 生产保持 false |
+| `APP_KEY` | 空(自动) | JWT 签名密钥。留空 = entrypoint 首次启动生成并缓存到 `storage` volume(跨容器重建稳定)。需要多副本共享时手动填同一个值 |
 | `DB_DATABASE` | `v2board` | 业务库名 |
 | `DB_USERNAME` / `DB_PASSWORD` | — | 业务账号 |
 | `DB_ROOT_PASSWORD` | — | MySQL root,用于 mysqldump 备份 |
@@ -273,6 +274,7 @@ tar czf v2board-state-$(date +%F).tgz \
 |---|---|
 | `docker compose logs -f v2board` 立即返回空 | v2board 容器没创建。先确认 `up -d` 跑过,`docker compose ps -a` 应能看到 v2board |
 | 容器一直 restart | `docker compose logs v2board` 看启动报错。最常见是 DB/Redis 连不上 |
+| 登录后立即被踢回登录页 / 反复登录 | `APP_KEY` 变了导致签发的 JWT 全部失效。`docker compose exec v2board grep APP_KEY .env` 检查;跨 `down && up` / rebuild 是否稳定。entrypoint 已把 APP_KEY 缓存到 storage volume,若仍异常检查 storage volume 是否被清掉 |
 | 首次启动 "Waiting for MySQL" 等 60 次后 WARNING,但 init-db 仍成功 | mariadb-client 的 `mysqladmin ping` 对 mysql:5.7 有认证假阴性,entrypoint 已改用 PHP PDO 探测。若仍出现,检查 `.env.docker` 里 `DB_PASSWORD` 是否含 `$`(compose 会插值,需写成 `$$`)|
 | 后台 404 / 路径不对 | `secure_path` 算错,用上面的 `php -r` 命令重新查 |
 | 改了后台配置不生效 | 容器内已 `config:cache`;面板保存时会自动重刷。Webman 模式不适用(本镜像是 PHP-FPM) |
