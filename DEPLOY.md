@@ -30,25 +30,20 @@
 - 一台 Linux VPS(推荐 Ubuntu 22.04+ / Debian 12+),已 root 或 sudo
 - 公网 IP,80/443 端口未占用
 - (可选,要 HTTPS 必备)一个 A 记录指向该 IP 的域名
-- VPS 至少 1 vCPU / 2 GB RAM(MySQL + Redis + 面板同机建议 2 GB 起)
+- VPS 至少 1 vCPU / 1 GB RAM(只跑容器,不编译,1G 够用)
 
 ## 文件清单
 
-部署相关的文件都在仓库根目录:
+**VPS 上部署只需要这 2 个文件**:
 
-```
-Dockerfile                # 构建镜像
-.dockerignore
-docker-compose.yml        # 三 service: v2board + mysql + redis
-.env.docker.example       # 环境变量模板
-docker/
-├── nginx.conf            # 容器内 nginx 站点
-├── supervisord.conf      # 进程编排
-├── laravel.crontab       # schedule:run
-├── entrypoint.sh         # 首次启动自动化(建 .env / 等待 MySQL / 导库 / 建管理员)
-├── init-db.php           # 导入 install.sql + 建管理员
-└── db-ping.php           # MySQL 存活探测(PHP PDO,绕开 mariadb-client 假阴性)
-```
+| 文件 | 作用 |
+|---|---|
+| `docker-compose.yml` | 定义 v2board + mysql + redis 三个 service、volume、environment |
+| `.env.docker` | 你填的密码 / 邮箱 / 站点 URL |
+
+应用代码、`Dockerfile`、entrypoint 脚本、`install.sql` 全部在 GHCR 镜像里 —— VPS 不需要 clone 整个仓库,也不需要本地编译。
+
+> 仓库内的 `Dockerfile` / `docker/` / `.github/workflows/docker-publish.yml` 是给 GitHub Actions 构建镜像用的,部署时用不到。
 
 ## 快速开始
 
@@ -57,23 +52,21 @@ docker/
 ### 1. 安装 Docker
 
 ```bash
-apt update && apt install -y git curl ufw ca-certificates
+apt update && apt install -y curl ufw ca-certificates
 curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 docker version && docker compose version   # 验证
 ```
 
-### 2. 拉代码
+### 2. 拉取部署文件
+
+只需要两个文件,直接从仓库 raw 下载:
 
 ```bash
-cd /opt
-git clone https://github.com/jackxunkun163/v2board.git
-cd v2board
+mkdir -p /opt/v2board && cd /opt/v2board
+curl -O https://raw.githubusercontent.com/jackxunkun163/v2board/master/docker-compose.yml
+curl -O https://raw.githubusercontent.com/jackxunkun163/v2board/master/.env.docker.example
 ```
-
-> 如果你的 docker 文件在另一个 fork / 本地编辑后未提交,需要先把
-> `Dockerfile`、`docker-compose.yml`、`.env.docker.example`、`docker/`
-> 覆盖到对应位置。
 
 ### 3. 配置环境
 
@@ -94,20 +87,18 @@ nano .env.docker
 
 `DB_HOST` / `REDIS_HOST` 已在 compose 里写死为 service 名,不用在 `.env.docker` 配。
 
-### 4. 启动
-
-镜像由 GitHub Actions 预编译并推到 GHCR(`ghcr.io/jackxunkun163/v2board:latest`),VPS 直接拉,**不在本机编译**(适合 1C1G 等弱鸡 VPS):
+### 4. 拉镜像并启动
 
 ```bash
-docker compose --env-file .env.docker pull v2board
+docker compose --env-file .env.docker pull
 docker compose --env-file .env.docker up -d
 ```
 
-> 首次部署如果 `pull` 报 `not found` 或 `denied`,说明 GHCR 上的镜像还没构建好 / 仍是 private。两种处理:
-> - **等待首次 CI 跑完**(推 master 后到 GitHub Actions 页看进度,约 5-15 分钟),然后把仓库的 Packages 镜像可见性改成 public(GitHub → 你的头像 → Packages → v2board → package settings → Change visibility)。
-> - **临时本地编译**:`docker compose --env-file .env.docker up -d --build`(会跑 PHP 扩展编译 + composer install,需 2GB+ 内存)。
-
 三个容器会按 `mysql → redis → v2board` 顺序启动。
+
+> 首次部署如果 `pull` 报 `not found` / `unauthorized`:
+> - **CI 还没跑完**:浏览器打开 `https://github.com/jackxunkun163/v2board/actions` 看进度(约 5-15 分钟),绿勾后再 pull
+> - **镜像可见性是 private**:浏览器打开 `https://github.com/users/jackxunkun163/packages/container/v2board/settings` → 拉到底 **Danger Zone → Change visibility → Public**;或用 PAT 在 VPS 上 `docker login ghcr.io`
 
 ### 5. 看日志确认就绪
 
@@ -127,7 +118,7 @@ curl -I http://localhost:8080/    # 应 200
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `V2BOARD_IMAGE` | `ghcr.io/jackxunkun163/v2board:latest` | 面板镜像。fork 后再 fork 时改这里;也可固定到 `sha-xxxxxxx` 或 tag 锁版本 |
+| `V2BOARD_IMAGE` | `ghcr.io/jackxunkun163/v2board:latest` | 面板镜像。fork 后再 fork 时改这里;也可固定到 `sha-xxxxxxx` 锁版本 |
 | `V2BOARD_PORT` | `8080` | 宿主机映射端口。套反代后通常不暴露公网 |
 | `APP_URL` | — | 站点完整 URL,**必须**改成实际域名/IP |
 | `APP_ENV` | `production` | 生产保持 production |
@@ -139,7 +130,7 @@ curl -I http://localhost:8080/    # 应 200
 | `REDIS_PASSWORD` | 空 | 想开 Redis Auth 需同时改 `docker-compose.yml` 的 redis 启动命令 |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | 空 | 首次启动建管理员;之后改密码走面板 |
 
-`.env.docker` 已在 `.gitignore` 内,**含明文密码,勿提交**。
+`.env.docker` 含明文密码,**自行妥善保管**(curl 下来的部署目录不会被任何 git 跟踪)。
 
 ## HTTPS(Caddy 反代 + 自动证书)
 
@@ -236,18 +227,28 @@ docker compose --env-file .env.docker exec v2board php artisan horizon:terminate
 
 ### 升级面板
 
+分两种情况,通常只需要第 1 种。
+
+**1. 升级面板镜像(代码有更新)** —— 推 master 后 GitHub Actions 自动重建镜像,VPS 拉新版即可:
+
 ```bash
 cd /opt/v2board
-git pull                                          # 拉新 compose / 配置
-docker compose --env-file .env.docker pull v2board    # 拉新预编译镜像
-docker compose --env-file .env.docker up -d           # 用新镜像重建容器
+docker compose --env-file .env.docker pull v2board
+docker compose --env-file .env.docker up -d
 docker compose --env-file .env.docker exec v2board php artisan v2board:update
 ```
 
 `v2board:update` 会跑 `database/update.sql` 增量更新 + 重启 horizon。
 
 > CI 构建需要几分钟。如果 `pull` 拉到的还是旧镜像,等几分钟(GitHub Actions 页看进度)再 pull。
-> 跟裸机部署一样,**`git pull` 前如有本地修改会被覆盖**。生产建议把 docker 文件维护在自己的 fork。
+
+**2. 升级 compose 配置(`docker-compose.yml` 有改动)** —— 偶尔需要,比如改了端口映射、加了新 service:
+
+```bash
+cd /opt/v2board
+curl -O https://raw.githubusercontent.com/jackxunkun163/v2board/master/docker-compose.yml
+docker compose --env-file .env.docker up -d
+```
 
 ### 备份与恢复
 
@@ -281,13 +282,13 @@ tar czf v2board-state-$(date +%F).tgz \
 
 | 症状 | 排查 |
 |---|---|
+| `docker compose pull` 报 `not found` / `unauthorized` | CI 还没构建完,或镜像可见性还是 private。看 `https://github.com/jackxunkun163/v2board/actions` 状态;绿勾后到 Packages 设置页改 public |
 | `docker compose logs -f v2board` 立即返回空 | v2board 容器没创建。先确认 `up -d` 跑过,`docker compose ps -a` 应能看到 v2board |
 | 容器一直 restart | `docker compose logs v2board` 看启动报错。最常见是 DB/Redis 连不上 |
-| `docker compose pull` 报 `not found` / `denied` | GHCR 镜像还没构建好,或镜像可见性还是 private。等 GitHub Actions 跑完;或去 GitHub → Packages → v2board → package settings 改成 public;或临时本地编译 `up -d --build` |
-| 登录后立即被踢回登录页 / 反复登录 | `APP_KEY` 变了导致签发的 JWT 全部失效。`docker compose exec v2board grep APP_KEY .env` 检查;跨 `down && up` / rebuild 是否稳定。entrypoint 已把 APP_KEY 缓存到 storage volume,若仍异常检查 storage volume 是否被清掉 |
+| 登录后立即被踢回登录页 / 反复登录 | `APP_KEY` 变了导致签发的 JWT 全部失效。`docker compose exec v2board grep APP_KEY .env` 检查;跨 `down && up` 是否稳定。entrypoint 已把 APP_KEY 缓存到 storage volume,若仍异常检查 storage volume 是否被清掉 |
 | 首次启动 "Waiting for MySQL" 等 60 次后 WARNING,但 init-db 仍成功 | mariadb-client 的 `mysqladmin ping` 对 mysql:5.7 有认证假阴性,entrypoint 已改用 PHP PDO 探测。若仍出现,检查 `.env.docker` 里 `DB_PASSWORD` 是否含 `$`(compose 会插值,需写成 `$$`)|
-| 后台 404 / 路径不对 | `secure_path` 算错,用上面的 `php -r` 命令重新查 |
-| 改了后台配置不生效 | 容器内已 `config:cache`;面板保存时会自动重刷。Webman 模式不适用(本镜像是 PHP-FPM) |
+| 后台 404 / 路径不对 | `secure_path` 算错,用上面的 `artisan tinker` 命令重新查 |
+| 改了后台配置不生效 | 容器内已 `config:cache`;面板保存时会自动重刷 |
 | horizon 不工作 | `docker compose exec v2board php artisan horizon` 看前台输出;通常是 Redis 连不上 |
 | 502 / 504 | php-fpm 挂了或超时。检查 `storage/logs/laravel.log` 和容器日志 |
 | 时区错乱 | 容器内 Laravel 用 `Asia/Shanghai`(见 `config/app.php`),不依赖宿主时区 |
