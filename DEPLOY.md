@@ -278,6 +278,60 @@ tar czf v2board-state-$(date +%F).tgz \
 
 `config` volume 里包含运行时生成的 `config/v2board.php`(面板所有后台设置),**这是必须备份的**。
 
+## 卸载
+
+两种级别,按需选。
+
+### A. 停服务,保留数据(以后还能恢复)
+
+```bash
+cd /opt/v2board
+docker compose --env-file .env.docker down
+```
+
+容器 + 网络删掉,**volume 保留**(MySQL 数据、后台配置、storage 都在)。以后 `up -d` 直接恢复。
+
+### B. 完全卸载,清干净(数据全没,不可恢复)
+
+```bash
+cd /opt/v2board
+
+# 停容器 + 删容器 + 删 volume + 删网络
+docker compose --env-file .env.docker down -v
+
+# 删镜像
+docker rmi ghcr.io/jackxunkun163/v2board:latest mysql:5.7 redis:7-alpine
+
+# 删部署目录
+cd /
+rm -rf /opt/v2board
+```
+
+`down -v` 是关键参数 —— 把 4 个命名 volume(`v2board-storage` / `-config` / `-mysql` / `-redis`)全清掉,数据库数据 + 后台配置 + APP_KEY 缓存全丢。
+
+如果装了 Caddy 反代(见 HTTPS 章节),同样:
+
+```bash
+cd /opt/caddy && docker compose down -v && docker rmi caddy:2-alpine
+rm -rf /opt/caddy
+```
+
+### 验证清理干净
+
+```bash
+docker ps -a                                         # 无 v2board / mysql / redis / caddy
+docker volume ls | grep v2board                      # 空
+docker images | grep -E 'v2board|mysql|redis|caddy'  # 空
+ls /opt/                                             # 无 v2board / caddy
+```
+
+卸载不会动 Docker 引擎本身。要连 Docker 一起卸:
+
+```bash
+apt remove docker-ce docker-ce-cli containerd.io
+rm -rf /var/lib/docker
+```
+
 ## 故障排查
 
 | 症状 | 排查 |
