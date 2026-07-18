@@ -1,6 +1,6 @@
 # Docker 部署
 
-本文档描述如何用 Docker / Docker Compose 部署 V2Board 面板。**完全容器化** —— MySQL、Redis、面板应用全部跑在容器内,不依赖任何外部服务。
+本文档描述如何用 Docker / Docker Compose 部署 V2Board 面板。**完全容器化** —— MySQL、Redis、面板应用全部跑在容器内,不依赖任何外部服务。**镜像在 GitHub Actions 预编译并发布到 GHCR,VPS 只 `docker pull`**,不在本机编译(适合 1C1G 等弱鸡 VPS)。
 
 > 项目结构、运行时 quirks、`config/v2board.php` 的运行时生成机制等,见 [`AGENTS.md`](./AGENTS.md)。本文档只覆盖部署。
 
@@ -10,7 +10,7 @@
 
 | service | 镜像 | 作用 |
 |---|---|---|
-| `v2board` | 本仓库构建 | 面板应用;容器内 supervisor 编排 nginx + php-fpm + horizon + crond |
+| `v2board` | `ghcr.io/jackxunkun163/v2board:latest`(CI 预编译) | 面板应用;容器内 supervisor 编排 nginx + php-fpm + horizon + crond |
 | `mysql` | `mysql:5.7` | 业务数据库,持久化到命名 volume |
 | `redis` | `redis:7-alpine` | 缓存 / 队列 / Session,持久化到命名 volume |
 
@@ -96,11 +96,18 @@ nano .env.docker
 
 ### 4. 启动
 
+镜像由 GitHub Actions 预编译并推到 GHCR(`ghcr.io/jackxunkun163/v2board:latest`),VPS 直接拉,**不在本机编译**(适合 1C1G 等弱鸡 VPS):
+
 ```bash
-docker compose --env-file .env.docker up -d --build
+docker compose --env-file .env.docker pull v2board
+docker compose --env-file .env.docker up -d
 ```
 
-首次构建 5-10 分钟(下载 PHP 扩展、composer 依赖)。三个容器会按 `mysql → redis → v2board` 顺序启动。
+> 首次部署如果 `pull` 报 `not found` 或 `denied`,说明 GHCR 上的镜像还没构建好 / 仍是 private。两种处理:
+> - **等待首次 CI 跑完**(推 master 后到 GitHub Actions 页看进度,约 5-15 分钟),然后把仓库的 Packages 镜像可见性改成 public(GitHub → 你的头像 → Packages → v2board → package settings → Change visibility)。
+> - **临时本地编译**:`docker compose --env-file .env.docker up -d --build`(会跑 PHP 扩展编译 + composer install,需 2GB+ 内存)。
+
+三个容器会按 `mysql → redis → v2board` 顺序启动。
 
 ### 5. 看日志确认就绪
 
@@ -120,6 +127,7 @@ curl -I http://localhost:8080/    # 应 200
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
+| `V2BOARD_IMAGE` | `ghcr.io/jackxunkun163/v2board:latest` | 面板镜像。fork 后再 fork 时改这里;也可固定到 `sha-xxxxxxx` 或 tag 锁版本 |
 | `V2BOARD_PORT` | `8080` | 宿主机映射端口。套反代后通常不暴露公网 |
 | `APP_URL` | — | 站点完整 URL,**必须**改成实际域名/IP |
 | `APP_ENV` | `production` | 生产保持 production |
@@ -230,14 +238,15 @@ docker compose --env-file .env.docker exec v2board php artisan horizon:terminate
 
 ```bash
 cd /opt/v2board
-git pull
-docker compose --env-file .env.docker build --no-cache v2board
-docker compose --env-file .env.docker up -d
+git pull                                          # 拉新 compose / 配置
+docker compose --env-file .env.docker pull v2board    # 拉新预编译镜像
+docker compose --env-file .env.docker up -d           # 用新镜像重建容器
 docker compose --env-file .env.docker exec v2board php artisan v2board:update
 ```
 
 `v2board:update` 会跑 `database/update.sql` 增量更新 + 重启 horizon。
 
+> CI 构建需要几分钟。如果 `pull` 拉到的还是旧镜像,等几分钟(GitHub Actions 页看进度)再 pull。
 > 跟裸机部署一样,**`git pull` 前如有本地修改会被覆盖**。生产建议把 docker 文件维护在自己的 fork。
 
 ### 备份与恢复
@@ -274,6 +283,7 @@ tar czf v2board-state-$(date +%F).tgz \
 |---|---|
 | `docker compose logs -f v2board` 立即返回空 | v2board 容器没创建。先确认 `up -d` 跑过,`docker compose ps -a` 应能看到 v2board |
 | 容器一直 restart | `docker compose logs v2board` 看启动报错。最常见是 DB/Redis 连不上 |
+| `docker compose pull` 报 `not found` / `denied` | GHCR 镜像还没构建好,或镜像可见性还是 private。等 GitHub Actions 跑完;或去 GitHub → Packages → v2board → package settings 改成 public;或临时本地编译 `up -d --build` |
 | 登录后立即被踢回登录页 / 反复登录 | `APP_KEY` 变了导致签发的 JWT 全部失效。`docker compose exec v2board grep APP_KEY .env` 检查;跨 `down && up` / rebuild 是否稳定。entrypoint 已把 APP_KEY 缓存到 storage volume,若仍异常检查 storage volume 是否被清掉 |
 | 首次启动 "Waiting for MySQL" 等 60 次后 WARNING,但 init-db 仍成功 | mariadb-client 的 `mysqladmin ping` 对 mysql:5.7 有认证假阴性,entrypoint 已改用 PHP PDO 探测。若仍出现,检查 `.env.docker` 里 `DB_PASSWORD` 是否含 `$`(compose 会插值,需写成 `$$`)|
 | 后台 404 / 路径不对 | `secure_path` 算错,用上面的 `php -r` 命令重新查 |

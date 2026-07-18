@@ -5,10 +5,13 @@
 
 services:
   v2board:
+    # Pre-built image published by .github/workflows/docker-publish.yml (GHCR).
+    # `docker compose pull` uses this; `docker compose build` falls back to the
+    # Dockerfile below for offline/local builds.
+    image: ${V2BOARD_IMAGE:-ghcr.io/jackxunkun163/v2board:latest}
     build:
       context: .
       dockerfile: Dockerfile
-    image: v2board:latest
     container_name: v2board
     restart: unless-stopped
     depends_on:
